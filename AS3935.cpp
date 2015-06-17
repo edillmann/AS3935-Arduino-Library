@@ -1,33 +1,40 @@
 /*
-  AS3935.cpp - AS3935 Franklin Lightning Sensor™ IC by AMS library
-  Copyright (c) 2012 Raivis Rengelis (raivis [at] rrkb.lv). All rights reserved.
+   AS3935.cpp - AS3935 Franklin Lightning Sensor™ IC by AMS library
+   Copyright (c) 2012 Raivis Rengelis (raivis [at] rrkb.lv). All rights reserved.
+   Copyright (c) 2015 Eric Dillmann. All rights reserved.
 
-  This library is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 3 of the License, or (at your option) any later version.
+   This library is free software; you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public
+   License as published by the Free Software Foundation; either
+   version 3 of the License, or (at your option) any later version.
 
-  This library is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
+   This library is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
 
-  You should have received a copy of the GNU Lesser General Public
-  License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-*/
+   You should have received a copy of the GNU Lesser General Public
+   License along with this library; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
 
 #include "AS3935.h"
 // I2c library by Wayne Truchsess
 #include <I2C.h>
 
+volatile int16_t pulse;
+
 AS3935::AS3935(uint8_t irq,uint8_t addr)
 {
-    //configure the uint16_terrupt
-	_IRQPin = irq;
-    //configure the address
+	//configure the uint16_terrupt
+	_IRQ = irq;
+	//configure the address
 	_ADDR = addr;
-	pinMode(_IRQPin,INPUT);
+}
+
+uint8_t AS3935::getTune()
+{
+	return _tune;
 }
 
 uint8_t AS3935::_ffsz(uint8_t mask)
@@ -39,41 +46,37 @@ uint8_t AS3935::_ffsz(uint8_t mask)
 	return i;
 }
 
+void AS3935::setTune(int tuneValue)
+{
+	_tune = tuneValue;
+	registerWrite(AS3935_TUN_CAP,tuneValue);
+	delay(2);
+	powerUp();
+}
+
 void AS3935::registerWrite(uint8_t reg, uint8_t mask, uint8_t data)
 {
-  Serial.print("regW ");
-  Serial.print(reg,HEX);
-  Serial.print(" ");
-  Serial.print(mask,HEX);
-  Serial.print(" ");
-  Serial.print(data,HEX);
-  Serial.print(" read ");
-  
-    //read 1 uint8_t
-    I2c.read((uint8_t)_ADDR, (uint8_t)reg, (uint8_t)0x01);
-    //put it to regval
+	//read 1 uint8_t
+	I2c.read((uint8_t)_ADDR, (uint8_t)reg, (uint8_t)0x01);
+	//put it to regval
 	uint8_t regval = I2c.receive();
-  Serial.print(regval,HEX);
-    //do masking
+	//do masking
 	regval &= ~(mask);
 	if (mask)
 		regval |= (data << (_ffsz(mask)-1));
 	else
 		regval |= data;
-    Serial.print(" write ");
-    Serial.print(regval,HEX);
-    Serial.print(" err ");
-    //write the register back
-    Serial.println(I2c.write(_ADDR, reg, regval),HEX);    
+	//write the register back
+	I2c.write(_ADDR, reg, regval);
 }
 
 uint8_t AS3935::registerRead(uint8_t reg, uint8_t mask)
 {
 	//read 1 uint8_t
-    I2c.read((uint8_t)_ADDR, (uint8_t)reg, (uint8_t)0x01);
-    //put it to regval
+	I2c.read((uint8_t)_ADDR, (uint8_t)reg, (uint8_t)0x01);
+	//put it to regval
 	uint8_t regval = I2c.receive();
-    //mask
+	//mask
 	regval = regval & mask;
 	if (mask)
 		regval >>= (_ffsz(mask)-1);
@@ -82,14 +85,18 @@ uint8_t AS3935::registerRead(uint8_t reg, uint8_t mask)
 
 void AS3935::reset()
 {
-    //write to 0x3c, value 0x96
+	//write to 0x3c, value 0x96
 	I2c.write((uint8_t)_ADDR, (uint8_t)0x3c, (uint8_t)0x96);
 	delay(2);
 }
 
+static void pulseCounter() {
+	pulse++;
+}
+
 bool AS3935::calibrate()
 {
-	uint16_t target = 3125, currentcount = 0, bestdiff = INT_MAX, currdiff = 0;
+	int16_t target = 3125, currentcount = 0, bestdiff = INT_MAX, currdiff = 0;
 	uint8_t bestTune = 0, currTune = 0;
 	unsigned long setUpTime;
 	uint16_t currIrq, prevIrq;
@@ -102,44 +109,37 @@ bool AS3935::calibrate()
 	registerWrite(AS3935_DISP_LCO,1);
 	// tuning is not linear, can't do any shortcuts here
 	// going over all built-in cap values and finding the best
-	for (currTune = 0; currTune <= 0x0F; currTune++) 
-	{
+	attachInterrupt(0, pulseCounter, RISING);
+	
+	for (currTune = 0; currTune <= 0x0F; currTune++) {
 		registerWrite(AS3935_TUN_CAP,currTune);
 		// let it settle
 		delay(2);
-		currentcount = 0;
-		prevIrq = digitalRead(_IRQPin);
-		setUpTime = millis() + 100;
-		while((long)(millis() - setUpTime) < 0)
-		{
-			currIrq = digitalRead(_IRQPin);
-			if (currIrq > prevIrq)
-			{
-				currentcount++;	
-			}
-			prevIrq = currIrq;
-		}
-		currdiff = target - currentcount;
-		// don't look at me, abs() misbehaves
-		if(currdiff < 0)
-			currdiff = -currdiff;
-		if(bestdiff > currdiff)
-		{
+		noInterrupts();
+		pulse = 0;
+		interrupts();
+		delay(100);
+		noInterrupts();
+		currentcount = pulse;
+		interrupts();
+		
+		currdiff = abs(target - currentcount);
+		if(bestdiff > currdiff) {
 			bestdiff = currdiff;
 			bestTune = currTune;
 		}
 	}
+	detachInterrupt(0);
 	registerWrite(AS3935_TUN_CAP,bestTune);
 	delay(2);
 	registerWrite(AS3935_DISP_LCO,0);
 	// and now do RCO calibration
-    I2c.write((uint8_t)_ADDR, (uint8_t)0x3D, (uint8_t)0x96);
+	I2c.write((uint8_t)_ADDR, (uint8_t)0x3D, (uint8_t)0x96);
 	delay(3);
 	// if error is over 109, we are outside allowed tuning range of +/-3.5%
-    Serial.print("Difference ");
-    Serial.println(bestdiff);
-	return bestdiff > 109?false:true;
-}	
+	_tune = bestTune;
+	return bestdiff > 109 ? false : true;
+}
 
 void AS3935::powerDown()
 {
@@ -149,7 +149,7 @@ void AS3935::powerDown()
 void AS3935::powerUp()
 {
 	registerWrite(AS3935_PWD,0);
-    I2c.write((uint8_t)_ADDR, (uint8_t)0x3D, (uint8_t)0x96);
+	I2c.write((uint8_t)_ADDR, (uint8_t)0x3D, (uint8_t)0x96);
 	delay(3);
 }
 
@@ -197,7 +197,7 @@ void AS3935::setOutdoors()
 uint16_t AS3935::getNoiseFloor()
 {
 	return registerRead(AS3935_NF_LEV);
-} 
+}
 
 uint16_t AS3935::setNoiseFloor(uint16_t noisefloor)
 {

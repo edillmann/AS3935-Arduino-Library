@@ -31,12 +31,12 @@ void printAS3935Registers();
 void AS3935Irq();
 volatile int AS3935IrqTriggered;
 
-// Library object initialization First argument is interrupt pin, second is device I2C address
-AS3935 AS3935(2,0);
+// Library object initialization First argument is interrupt, second is device I2C address
+AS3935 AS3935(0,0x3);
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
   //I2C library initialization
   I2c.begin();
   I2c.pullup(true);

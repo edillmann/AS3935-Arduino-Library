@@ -8,6 +8,10 @@ This is the modification of the library by Raivisr
 
 See his page for detais. This modification changes SPI to I2C communication.
 
+This is modified to use interrupt for calibration
+
+setTune can be used to bypass calibration
+
 Tested with Arduino 1.0.3 on Arduino Pro Mini. 
 
 Short function reference:
